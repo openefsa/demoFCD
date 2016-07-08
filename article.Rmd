@@ -1,14 +1,18 @@
 ---
 title: "Mapping EFSA's food consumption data"
 author: "Carsten Behring"
-date: "June 22, 2016"
+date: "July 08, 2016"
 output:
-  html_notebook: 
+  github_document: default
+  html_document: default
+  html_notebook:
+    number_sections: yes
     theme: journal
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, fig.height=15, fig.width=15, dev='png')
 library(readxl)
 library(dplyr)
 library(tmap)
@@ -16,23 +20,24 @@ library(tidyr)
 library(knitr)
 library(ggplot2)
 data("Europe")
-
+tmap_mode("plot")
 ```
 
 # EFSA Food consumption data
-The European Food Safety Authority collects food consumption data from all EU countries and and integrates them in their database. The data is mainly based on country specific surveys, in which individuals get interviewed about their food consumption habits.
+The European Food Safety Authority collects food consumption data from all EU countries and and integrates them in their database. The data is based on country specific surveys, in which individuals get interviewed about their food consumption habits. This data is used for EFSAs risk assesments as part of the exposure assesment.
 
 # Accessing the data
 The data is available from EFSA's website http://www.efsa.europa.eu/en/food-consumption/comprehensive-database in form of Excel files.
 
-I selected for this tutorial the file of the "Chronic food consumption statistics" - "grams per day" - "Consumers only".
+I selected for this tutorial the file of the "Chronic food consumption statistics" - "grams per day" - "all subjetcs".
 
-I downloaded the data and saved it in a file "chronicgdaytotpop_L4.csv"
+The following code reads the data from the EFSA website and writes it to a local file.
+The file contains 4 sheets and we select the last one, which contains data on the lowest foodex level 4.
 
-The following code reads the data from the EFSA website. The file contains 4 sheets and we select the last one, which contains data on the lowest foodex level 4.
+```{r}
 
-```{r cache=TRUE}
-#download.file("http://www.efsa.europa.eu/sites/default/files/chronicgdaytotpop.xlsx","chronicgdaytotpop.xlsx")
+if (!file.exists("chronicgdaytotpop.xlsx"))
+  download.file("http://www.efsa.europa.eu/sites/default/files/chronicgdaytotpop.xlsx","chronicgdaytotpop.xlsx")
 
   
 ```
@@ -49,20 +54,48 @@ data <- read_excel("./chronicgdaytotpop.xlsx","L4_All_subjects_g_day",skip=2) %>
 
 
 The data is organised 'per country', 'per survey','per population class' and 'per food group'.
-The food classification follows the Foodex standard developed by EFSA, which is a hierarchical system.
-The current data contains the most detailed levels (3 and 4)
+The food classification follows the Foodex standard developed by EFSA, which is a hierarchical system for classifying food.
+The current data set contains the most detailed levels (3 and 4)
 
-The 'Mean' column contains then the mean consumption in grams per day of this food among the participants of the survey. Additionally to the mean other statistics are given (standard deviation, percentiles)
+The 'Mean' column contains then the mean consumption in grams per day of this food among the participants of the survey. Additionally to the mean other statistics about the distribution are given (standard deviation, percentiles)
 
 We can interpret a single row, such as:
 
 ```{r}
-str(data %>% filter(`Foodex L4`=='Couscous') %>% slice(1:1))
+str(data %>% filter(`Foodex L4` == 'Couscous') %>% slice(1:1))
 ```
 in the following way.
 
 There was a food consumption survey with name 'Austrian Study on Nutritional Status 2010-12 - Adults' run in 'Austria'.
-One group of '308' 'adults' was surveyed and the mean food consumption of food 'Couscous' in that group was 1.28 g  intake per day. There are some more variables for the distribution of the daily intake.
+One group of '308' 'Adults' was surveyed and the 'Mean' food consumption of food 'Couscous' in that group was '1.28' g  intake per day. There are some more variables for the distribution of the daily intake. Note the large standart deviation, which means that the eating habits of 'Couscous' various a lot.
+
+# Analysis of standart deviation
+One interestiong question on this data is, which food are distributed evenly, so most individuals eat them in similar proportions.
+One potentail interpretation of those, is to say that these are the food which are 'eaten in all of Europe, in all ages'. 
+
+Lets find those with dplyr, like this:
+
+```{r}
+data %>% group_by(`Foodex L4`) %>% 
+  filter(Mean > 5) %>% 
+  summarise(STD=mean(STD),mean=mean(Mean)) %>% 
+  arrange(STD) %>% 
+  head(20)
+```
+
+So it seems that the Europeans agrree on eating simmilar portions of :
+
+* salt
+* rice
+* fructose
+* Oil
+* Cream
+* tomato ketchup
+* coffee
+* cooked sausage
+   
+and others.
+   
 
 
 
@@ -117,6 +150,7 @@ The 'key.shp' and 'key.data' parameter specify, on which columns the data and th
 The data can now be shown on the screen as a simple map, containing  one layer which represents the mean food consumption of jam in the color of the countries polygon.
 
 ```{r}
+
 tm_shape(Europe.jam) +
   tm_polygons(col='food_mean',title = "Jam consumption (mg/day)") +
   tm_format_Europe_wide()
@@ -234,15 +268,23 @@ In such a map the user can:
   * select layers to see (Jam consumption,#individuals)
   * click on countries to see all information for this country in the shape file
 
-```{r}
-tmap_mode("view")
+```{r fig.height=6, fig.width=6}
+if (opts_knit$get()$rmarkdown.pandoc.to == 'html') {
+  tmap_mode("view")
+} else {
+  tmap_mode("plot")
+}  
 tm_shape(Europe.jam) +
   tm_polygons(col='food_mean',title = "Jam consumption (mg/day)") +
 tm_shape(Europe.surveyed) +
-  tm_polygons("numSubjects",n=10,title="# individuals",palette="Blues") +
+  tm_polygons("numSubjects",n = 10,title = "# individuals",palette="Blues") +
   tm_format_Europe_wide()
-
+tmap_mode("plot")
 ```
+
+# session info
+
+The following R library versions were used for this tutorial.
 
 ```{r}
 sessionInfo()
