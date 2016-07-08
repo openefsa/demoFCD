@@ -1,0 +1,250 @@
+---
+title: "Mapping EFSA's food consumption data"
+author: "Carsten Behring"
+date: "June 22, 2016"
+output:
+  html_notebook: 
+    theme: journal
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(dplyr)
+library(tmap)
+library(tidyr)
+library(knitr)
+library(ggplot2)
+data("Europe")
+
+```
+
+# EFSA Food consumption data
+The European Food Safety Authority collects food consumption data from all EU countries and and integrates them in their database. The data is mainly based on country specific surveys, in which individuals get interviewed about their food consumption habits.
+
+# Accessing the data
+The data is available from EFSA's website http://www.efsa.europa.eu/en/food-consumption/comprehensive-database in form of Excel files.
+
+I selected for this tutorial the file of the "Chronic food consumption statistics" - "grams per day" - "Consumers only".
+
+I downloaded the data and saved it in a file "chronicgdaytotpop_L4.csv"
+
+The following code reads the data from the EFSA website. The file contains 4 sheets and we select the last one, which contains data on the lowest foodex level 4.
+
+```{r cache=TRUE}
+#download.file("http://www.efsa.europa.eu/sites/default/files/chronicgdaytotpop.xlsx","chronicgdaytotpop.xlsx")
+
+  
+```
+
+```{r,warning=FALSE}
+data <- read_excel("./chronicgdaytotpop.xlsx","L4_All_subjects_g_day",skip=2) %>% 
+  tbl_df() %>%
+  mutate(Country=ifelse(Country=='Czech Republic','Czech Rep.',Country))
+  
+```
+
+
+# Description of data
+
+
+The data is organised 'per country', 'per survey','per population class' and 'per food group'.
+The food classification follows the Foodex standard developed by EFSA, which is a hierarchical system.
+The current data contains the most detailed levels (3 and 4)
+
+The 'Mean' column contains then the mean consumption in grams per day of this food among the participants of the survey. Additionally to the mean other statistics are given (standard deviation, percentiles)
+
+We can interpret a single row, such as:
+
+```{r}
+str(data %>% filter(`Foodex L4`=='Couscous') %>% slice(1:1))
+```
+in the following way.
+
+There was a food consumption survey with name 'Austrian Study on Nutritional Status 2010-12 - Adults' run in 'Austria'.
+One group of '308' 'adults' was surveyed and the mean food consumption of food 'Couscous' in that group was 1.28 g  intake per day. There are some more variables for the distribution of the daily intake.
+
+
+
+# Prepare data for mapping
+For mapping purposes we can now decide which food group we want to use, 'Jam' in this case, and need to decide, how to aggregate the data of the different surveys and population groups. In this case I take the most simple approach, which is to average over all surveys and population groups. 
+
+This is good enough for illustrative purposes, but a exposure assessment based on this data needed to find a more sophisticated strategy in order to consider methodological differences between the studies.
+
+
+```{r}
+jam <- data %>% filter(`Foodex L4`=='Jam') %>% 
+  group_by(Country) %>% 
+  summarise(food_mean=mean(Mean,na.rm = T))
+ 
+```
+
+The data is now in a format, ready to be presented in a pan european map, having a single value per country.
+
+```{r results='asis'}
+knitr::kable(jam)
+```
+
+For this tutorial we will use the tmap package.
+It comes already with a shape file of Europe.
+First we will restrict it to EU countries:
+
+```{r}
+data(Europe)
+Europe.eu <- Europe[!is.na(Europe$EU_Schengen),]
+```
+
+
+
+
+The tmap library allows to append this data easily to an existing European shape file, by using the 'append_data' function.
+
+As the spelling of 'Czech Republic' in the data does not match the shape file, we rename it here.
+
+```{r}
+
+jam <- jam %>% 
+  ungroup() %>%
+  mutate(Country=ifelse(Country=='Czech Republic','Czech Rep.',Country))
+Europe.jam <- append_data(Europe.eu,as.data.frame(jam),key.shp = 'name',key.data = "Country")
+```
+
+The 'key.shp' and 'key.data' parameter specify, on which columns the data and the shape file should be joined.
+
+# Showing a pan european map of food consumption
+
+## simple map
+The data can now be shown on the screen as a simple map, containing  one layer which represents the mean food consumption of jam in the color of the countries polygon.
+
+```{r}
+tm_shape(Europe.jam) +
+  tm_polygons(col='food_mean',title = "Jam consumption (mg/day)") +
+  tm_format_Europe_wide()
+```
+
+## more advanced map
+
+We can easily add extra information to the map, like the iso code of the countries, which are in column 'iso_a3' of the shapefile.
+
+```{r}
+tm_shape(Europe.jam) +
+  tm_polygons(col='food_mean',title = "Jam consumption (mg/day)") +
+  tm_text('iso_a3',size = .5,
+          col = "black",
+         bg.color = "white") +
+    tm_format_Europe_wide()
+```
+
+
+## multiple maps
+The following code shows one of the strength of using tmap, which is the very easy creation of multiple maps.
+Let's see how to show 4 maps, each with a different food.
+
+First we filter the data by the 4 foods, and then we transform it from 'long' to 'wide' format with the 'tidyr' packages.
+
+```{r}
+
+food_data <- data %>% 
+  
+  filter(`Foodex L4` %in% c('Wheat grain','Jam','Couscous','Dried fruits')) %>% 
+  group_by(Country,`Foodex L4`) %>% 
+  summarise(food_mean=mean(Mean,na.rm = T))
+  
+food_data <- spread(food_data,"Foodex L4",'food_mean') 
+
+```
+
+This results in a table, which has one column per food:
+
+```{r results='asis'}
+knitr::kable(food_data)
+```
+
+This can be converted into 4 maps, by just using a vector with the column names in the 'col' argument of tm_polygons:
+This will create one map for each column name in the vector.
+
+```{r}
+
+food_data <- food_data %>% 
+  ungroup() %>%
+  mutate(Country=ifelse(Country=='Czech Republic','Czech Rep.',Country))
+Europe.4foods <- append_data(Europe.eu,as.data.frame(food_data),key.shp = 'name',key.data = "Country")
+tm_shape(Europe.4foods) + 
+  
+  tm_polygons(col=c('Jam','Wheat grain','Couscous','Dried fruits'),n=3) +
+  tm_format_Europe(legend.position = c("left","top"))
+
+```
+
+# Map of people surveyed
+An other type of information which can be extracted from the data set, is information about the food consumption surveys.
+The following code counts the number of individuals, which were surveyed per country.
+In case of various surveys, I just sum it up.
+
+```{r results='asis'}
+peopleSurveyed <- data %>% 
+  group_by(Survey) %>% 
+  slice(1) %>% 
+  select(Country,Survey,`Nr Subjects`) %>% 
+  group_by(Country) %>% 
+  summarise(numSubjects=sum(`Nr Subjects`))
+
+kable(peopleSurveyed)
+
+```
+
+This can be plotted as a bar chart, to compare easily the number of individuals surveyed.
+As we can see, there are large differences between them. Finland and Sweden have each surveyed more the 4000 individuals, while others have below 500. 
+
+```{r}
+ggplot(peopleSurveyed) +
+  geom_bar(aes(x=reorder(Country,numSubjects),
+               y=numSubjects), 
+           stat = 'identity'
+          ) + 
+  coord_flip()
+
+```
+
+The same data shown as map shows a rather clear difference between north and southern Europe.
+
+```{r}
+
+Europe.surveyed <- append_data(Europe.eu,peopleSurveyed,key.shp = 'name',key.data = "Country")
+tm_shape(Europe.surveyed) +
+  tm_polygons("numSubjects",n = 10,title = "# individuals") +
+tm_shape(Europe.surveyed) +
+  tm_bubbles(col = 'pop_est',
+             size = "gdp_cap_est",
+             title.col = 'Population estimated',
+             title.size = "GDP estimated",
+             palette = "Blues",
+             contrast = c(0.5,1),
+             n = 5) +
+  tm_format_Europe_wide()
+```
+
+# interactive map
+
+Tmap has as well an interactive mode. To demonstrate it, we will now add two layers we have used before,'Jam consumption' and '# individuals surveyed' to the same interactive map.
+
+In such a map the user can:
+  * change background (online) map
+  * zoom and drag the mp
+  * select layers to see (Jam consumption,#individuals)
+  * click on countries to see all information for this country in the shape file
+
+```{r}
+tmap_mode("view")
+tm_shape(Europe.jam) +
+  tm_polygons(col='food_mean',title = "Jam consumption (mg/day)") +
+tm_shape(Europe.surveyed) +
+  tm_polygons("numSubjects",n=10,title="# individuals",palette="Blues") +
+  tm_format_Europe_wide()
+
+```
+
+```{r}
+sessionInfo()
+```
+
